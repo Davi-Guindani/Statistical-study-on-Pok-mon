@@ -1,0 +1,519 @@
+# Importando pacotes
+```{r}
+library(tidyverse)
+library(summarytools)
+library(ggplot2)
+library(stringr)
+```
+# Leitura e limpeza dos dados
+## Importando o dataset 
+```{r}
+dados <- read_csv("pokemons2.csv")
+```
+## Uma visualização superficial dos dados
+```{r}
+glimpse(dados)
+```
+##  Uma sumário rápido do dataset
+```{r}
+summarytools::dfSummary(dados)
+```
+* Aqui é importante perceber que, no item 4, a geração 9 foi trocada de lugar com a 5 pois a função dfSummary() organiza por ordem alfabética, com isso, o "ix" que indica 9 em romano, tomou a frente do "v" de todas as gerações de 5 a 8. Isso será corrigido mais a frente
+
+##  Checando se há prensença de algum erro ou NA
+```{r}
+dados %>% 
+  summarise(
+    across(everything(), ~sum(is.na(.x)))
+  )
+```
+* Como pode-se ver, não há valores NA, o que é muito bom, pois essas informações são acessíveis a qualquer um na internet de forma completa e correta (estamos falando da franquia de entretenimento mais rentável do mundo), então ter valores NA seria algo não plausível. Com isso, posso seguir a análise.
+* Corrigindo a questão da ordenação das generations citada anteriormente
+```{r}
+dados$generation <- str_replace(dados$generation, "generation-", "")
+dados$generation <- as.character(as.numeric(as.roman((dados$generation))))
+dados[, "generation"]
+```
+* Aqui optei por tirar o texto "generation-" e manter somente os números (continua sendo suficiente para o entendimento), substituino para algarismos árabes.
+
+## Usando mutate para ajustar valores
+```{r}
+dados <- dados %>% 
+  mutate(
+    evolves_from = ifelse(evolves_from == "nothing", NA, evolves_from),
+    type2 = ifelse(type2 == "None", NA, type2)
+  )
+```
+* Aqui opto por converter os valores "nothing" da coluna "evolves_from" e "None" da coluna "type2" para NA, pois eles indicam a ausência da valor, e é justamente o objetivo do NA em R.
+```{r}
+dados <- dados %>% 
+  mutate(
+    weight = weight / 10, 
+    height = height / 10
+  )
+```
+* Se verificarmos no [site oficial](https://www.pokemon.com/br/pokedex/ivysaur) e compararmos com a saída de dfSummary(), perceberemos que os pesos e as alturas estão com uma espécie de erro, parece que estão multiplicados por 10.
+* O bloco acima resolve o problema
+* Com isso, a leitura e limpeza dos dados foi feita e podemos partir para o próximo passo.
+
+# Análise exploratória
+## Verificando quantidade de valores diferentes em colunas de interesse
+* Apesar disso ser verificável na saída de dfSummary(), vale ressaltar a quantidade de valores únicos de algumas colunas, pois com isso, podemos tomar dimensão da variedade de informações presentes no dataset.
+* Escolhi as seguintes colunas: "rank", "generation", "evolves_from", "type1", "type2" e "abilities." Com elas, conseguimos entender um pouco melhor de como funciona a divisão e organização dos Pokémons.
+
+### Coluna "rank"
+```{r}
+dados %>%
+  summarise(count = n_distinct(rank))
+```
+* Temos somente 4 ranques de Pokémon
+
+### Coluna "generation"
+```{r}
+dados %>%
+  summarise(count = n_distinct(generation))
+```
+* São 9 gerações de Pokémon até agora (podem lançar mais no futuro)
+
+### Coluna "evolves_from"
+```{r}
+dados %>%
+  summarise(count = n_distinct(evolves_from))
+```
+* Existem 458 Pokémons que geram pelo menos uma evolução
+
+### Coluna "type1"
+```{r}
+dados %>%
+  summarise(count = n_distinct(type1))
+```
+* São 18 tipos primários
+
+### Coluna "type2"
+```{r}
+dados %>%
+  summarise(count = n_distinct(type2))
+```
+* São 19 tipos secundários (os mesmos 18 primários + NA)
+
+### Coluna "abilities"
+```{r}
+dados %>%
+  summarise(count = n_distinct(abilities))
+```
+* Importante perceber que, nem todos os Pokémons apresentam somente 1 habilidade. Na saída de dfSummary percebe-se que, algumas ocorrências de abilities tem 2 ou mais valores agregados, separados por um espaço no texto. Como no item 9 da lista 17 (lista de "abilities"), ali são 3 habilidades, o Pokémon assume 1 delas somente, quando nasce. Com isso, o trabalho de identificar as habilidades fica dificultado, uma vez que, o delimitador entre uma habilidade e outra é um espaço, que também pode fazer parte do nome de uma habilidade.
+
+## Verificando quantidade de valores NA em colunas de interesse
+### Coluna "rank"
+```{r}
+sum(is.na(dados$rank))
+```
+### Coluna "generation"
+```{r}
+sum(is.na(dados$generation))
+```
+### Coluna "evolves_from"
+```{r}
+sum(is.na(dados$evolves_from))
+```
+* Aqui vemos o efeito de ter realizado a operação de trocar o valor "nothing" por NA
+
+### Coluna "type1"
+```{r}
+sum(is.na(dados$type1))
+```
+### Coluna "type2"
+```{r}
+sum(is.na(dados$type2))
+```
+* Aqui vemos o efeito de ter realizado a operação de trocar o valor "None" por NA
+
+### Coluna "abilities"
+```{r}
+sum(is.na(dados$abilities))
+```
+
+## Agregando os dados e gerando estatísticas
+* Nesse tópico, farei um estudo focado em entender as diferenças entre os Pokémons conforme a variação de seus ranques ("baby", "legendary", "mythical", "ordinary"). Com base nos jogos e animes, sabemos que os míticos e lendários são Pokémons especiais, pois aparecem pouquíssimas vezes, entre outras características únicas. Porém, não sabemos o quão bem conseguimos diferenciar esses ranques somente com as informações do dataset. O objetivo do estudo é de verificar isso.
+
+### Tipagens dos Pokémons
+* Vamos agrupar os tipos e os ranques para entender se existe algum padrão entre essas classificações
+
+#### Ranque x tipo primário
+```{r}
+dados %>%
+  group_by(rank, type1) %>%
+  summarise(count = n())
+```
+* Em proporção
+```{r}
+dados %>%
+  group_by(rank, type1) %>%
+  summarise(count = n()) %>%
+  group_by(rank) %>%
+  mutate(percentage = count / sum(count) * 100)
+```
+* Lembrando que a porcentagem diz respeito a concentração de ocorrência do tipo primário dentro do ranque 
+
+#### Ranque x tipo secundário
+```{r}
+dados %>%
+  group_by(rank, type2) %>%
+  summarise(count = n())
+```
+* Em proporção
+```{r}
+dados %>%
+  group_by(rank, type2) %>%
+  summarise(count = n()) %>%
+  group_by(rank) %>%
+  mutate(percentage = count / sum(count) * 100)
+```
+* Quantos em cada ranque tem tipo secundário?
+```{r}
+dados %>% 
+  filter(!is.na(type2)) %>% 
+  group_by(rank) %>% 
+  summarise(count = n())
+```
+* Em proporção
+```{r}
+dados %>%
+  group_by(rank) %>%
+  summarise(media = mean(!is.na(type2)) * 100)
+```
+* Aqui já vemos que não é tão comum para os do ranque "baby" terem tipo secundário, diferente dos demais
+
+# Visualização
+## Scatter plots
+* Qual é a relação entre o peso e a vida?
+
+```{r}
+dados %>% 
+  ggplot(aes(x = weight, y = hp)) +
+  geom_point() +
+  geom_smooth(
+    aes(group = 1), 
+    show.legend = FALSE,
+    method = 'lm', 
+    se = FALSE,
+    linewidth = 1
+  ) +
+  labs(
+    title = 'Peso versus vida',
+    caption = 'Fonte: dataset `pokemons2`',
+    x = 'peso(Kg)',
+    y = 'vida'
+  )
+```
+
+* Pela reta de regressão conseguimos ver que existe uma relação de proporcionalidade, onde quanto maior o peso, maior a vida.
+* E qual é a relação entre a altura e a vida?
+```{r}
+dados %>% 
+  ggplot(aes(x = height, y = hp)) +
+  geom_point() +
+  geom_smooth(
+    aes(group = 1), 
+    show.legend = FALSE,
+    method = 'lm', 
+    se = FALSE,
+    linewidth = 1
+  ) +
+  labs(
+    title = 'Altura versus vida',
+    caption = 'Fonte: dataset `pokemons2`',
+    x = 'altura(m)',
+    y = 'vida'
+  )
+```
+
+* Aqui vemos que essa proporção já é mais acentuada: com pouco crescimento da altura, a vida aumenta mais do que comparado ao peso, dado a inclinação da reta de regressão.
+
+## Histogramas
+### Distribuição das estatísticas 
+```{r}
+dados %>% 
+  ggplot(aes(x = hp)) +
+    geom_histogram(breaks = seq(0, 275, 25)) +
+    scale_x_continuous(breaks = seq(0, 275, 25)) +
+  labs(
+    title = 'Pokémon versus vida',
+    caption = 'Fonte: dataset `pokemons2`',
+    x = 'vida',
+    y = 'pokémon(n)'
+  )
+```
+```{r}
+dados %>% 
+  ggplot(aes(x = atk)) +
+    geom_histogram(breaks = seq(0, 200, 25)) +
+    scale_x_continuous(breaks = seq(0, 200, 25)) +
+  labs(
+    title = 'Pokémon versus ataque',
+    caption = 'Fonte: dataset `pokemons2`',
+    x = 'ataque',
+    y = 'pokémon(n)'
+  )
+```
+```{r}
+dados %>% 
+  ggplot(aes(x = def)) +
+    geom_histogram(breaks = seq(0, 250, 25)) +
+    scale_x_continuous(breaks = seq(0, 250, 25)) +
+  labs(
+    title = 'Pokémon versus defesa',
+    caption = 'Fonte: dataset `pokemons2`',
+    x = 'defesa',
+    y = 'pokémon(n)'
+  )
+```
+```{r}
+dados %>% 
+  ggplot(aes(x = spatk)) +
+    geom_histogram(breaks = seq(0, 175, 25)) +
+    scale_x_continuous(breaks = seq(0, 175, 25)) +
+  labs(
+    title = 'Pokémon versus ataque especial',
+    caption = 'Fonte: dataset `pokemons2`',
+    x = 'ataque especial',
+    y = 'pokémon(n)'
+  )
+```
+```{r}
+dados %>% 
+  ggplot(aes(x = spdef)) +
+    geom_histogram(breaks = seq(0, 250, 25)) +
+    scale_x_continuous(breaks = seq(0, 250, 25)) +
+  labs(
+    title = 'Pokémon versus defesa especial',
+    caption = 'Fonte: dataset `pokemons2`',
+    x = 'defesa especial',
+    y = 'pokémon(n)'
+  )
+```
+```{r}
+dados %>% 
+  ggplot(aes(x = speed)) +
+    geom_histogram(breaks = seq(0, 200, 25)) +
+    scale_x_continuous(breaks = seq(0, 200, 25)) +
+  labs(
+    title = 'Pokémon versus velocidade',
+    caption = 'Fonte: dataset `pokemons2`',
+    x = 'velocidade',
+    y = 'pokémon(n)'
+  )
+```
+```{r}
+dados %>% 
+  ggplot(aes(x = total)) +
+    geom_histogram(breaks = seq(150, 725, 25)) +
+    scale_x_continuous(breaks = seq(150, 725, 25)) +
+  labs(
+    title = 'Pokémon versus total de estatísticas',
+    caption = 'Fonte: dataset `pokemons2`',
+    x = 'total',
+    y = 'pokémon(n)'
+  )
+```
+
+* Em geral, os Pokémons são bem equilibrados (no sentido de que existe uma boa distribuição pelas categorias criadas nos histogramas)
+```{r}
+dados %>% 
+  ggplot(aes(x = height)) +
+    geom_histogram(breaks = seq(0, 25, 1)) +
+    scale_x_continuous(breaks = seq(0, 25, 1)) +
+  labs(
+    title = 'Pokémon versus altura',
+    caption = 'Fonte: dataset `pokemons2`',
+    x = 'altura(m)',
+    y = 'pokémon(n)'
+  )
+```
+```{r}
+dados %>% 
+  ggplot(aes(x = weight)) +
+    geom_histogram(breaks = seq(0, 1000, 50)) +
+    scale_x_continuous(breaks = seq(0, 1000, 50)) +
+  labs(
+    title = 'Pokémon versus peso',
+    caption = 'Fonte: dataset `pokemons2`',
+    x = 'peso(Kg)',
+    y = 'pokémon(n)'
+  )
+```
+
+* Percebe-se que há uma grande concentração de Pokémons nos menores intervalos de altura e peso
+
+## Boxplots
+### Estatísticas dos Pokémons
+```{r}
+dados %>% 
+  ggplot(aes(x = generation, y = hp)) +
+    geom_boxplot(fill = 'gray') +
+  labs(
+    title = 'Geração versus vida',
+    caption = 'Fonte: dataset `pokemons2`',
+    x = 'geração',
+    y = 'vida'
+  )
+```
+```{r}
+dados %>% 
+  ggplot(aes(x = generation, y = atk)) +
+    geom_boxplot(fill = 'gray') +
+  labs(
+    title = 'Geração versus ataque',
+    caption = 'Fonte: dataset `pokemons2`',
+    x = 'geração',
+    y = 'ataque'
+  )
+```
+```{r}
+dados %>% 
+  ggplot(aes(x = generation, y = def)) +
+    geom_boxplot(fill = 'gray') +
+  labs(
+    title = 'Geração versus defesa',
+    caption = 'Fonte: dataset `pokemons2`',
+    x = 'geração',
+    y = 'defesa'
+  )
+```
+```{r}
+dados %>% 
+  ggplot(aes(x = generation, y = spatk)) +
+    geom_boxplot(fill = 'gray') +
+  labs(
+    title = 'Geração versus ataque especial',
+    caption = 'Fonte: dataset `pokemons2`',
+    x = 'geração',
+    y = 'ataque especial'
+  )
+```
+```{r}
+dados %>% 
+  ggplot(aes(x = generation, y = spdef)) +
+    geom_boxplot(fill = 'gray') +
+  labs(
+    title = 'Geração versus defesa especial',
+    caption = 'Fonte: dataset `pokemons2`',
+    x = 'geração',
+    y = 'defesa especial'
+  )
+```
+```{r}
+dados %>% 
+  ggplot(aes(x = generation, y = speed)) +
+    geom_boxplot(fill = 'gray') +
+  labs(
+    title = 'Geração versus velocidade',
+    caption = 'Fonte: dataset `pokemons2`',
+    x = 'geração',
+    y = 'velocidade'
+  )
+```
+```{r}
+dados %>% 
+  ggplot(aes(x = generation, y = total)) +
+    geom_boxplot(fill = 'gray') +
+  labs(
+    title = 'Geração versus total',
+    caption = 'Fonte: dataset `pokemons2`',
+    x = 'geração',
+    y = 'total'
+  ) 
+```
+```{r}
+dados %>% 
+  ggplot(aes(x = generation, y = height)) +
+    geom_boxplot(fill = 'gray') +
+  labs(
+    title = 'Geração versus altura',
+    caption = 'Fonte: dataset `pokemons2`',
+    x = 'geração',
+    y = 'altura(m)'
+  ) 
+```
+```{r}
+dados %>% 
+  ggplot(aes(x = generation, y = weight)) +
+    geom_boxplot(fill = 'gray') +
+  labs(
+    title = 'Geração versus peso',
+    caption = 'Fonte: dataset `pokemons2`',
+    x = 'geração',
+    y = 'peso'
+  ) 
+```
+
+* Com esses gráficos, conseguimos ver que, considerando que os círculos são outliers, existem consideráveis ocorrências de outliers em cada estatística, exceto uma: "total".
+* Provavelmente, esse deve ser um parâmetro muito importante para os desenvolvedores do jogo, se não o mais. Pode-se constatar que, é plausível um Pokémon ser um outlier em uma estatística ou outra, mas no total, ele tem que ficar dentro de um intervalo definido. Isso que possibilita a dualidade entre balanceamento e variedade na mecânica do jogo. Se todos os Pokémons fossem mais ou menos os mesmos (em relação as estatísticas), não teria como fazer diversas combinações táticas, tirando a diversão. Ao mesmo tempo, se existissem outliers na estatística "total", provavelmente seriam desbalanceados, e perejudicariam a experiência.
+
+## Barras e colunas
+### Quantidade de Pokémons e seus ranques ao longo das gerações
+```{r}
+dados %>% 
+  ggplot(aes(x = generation, fill = rank)) +
+    geom_bar() +
+    labs(
+    title = 'Pokémons versus gerações',
+    subtitle = 'e seus ranques',
+    caption = 'Fonte: dataset `pokemons2`',
+    x = 'geração',
+    y = 'pokémon(n)'
+  ) 
+```
+
+* Acho interessante percebermos algumas coisas aqui:
+* Claramente, houverem menos Pokémons do que o normal na sexta geração. Isso não é atoa. Houve uma troca de plataforma entre a geração 5 e a 6 (Nintendo DS para Nintendo 3DS), o que com certeza gerou uma carga maior de trabalho para os desenvolvedores. Implementar novos recursos e um novo hardware não é algo que seja fácil de fazer em uma aplicação gráfica de tempo real como um jogo. Além disso, novas mecânicas foram introduzidas, como a Mega Evolução, o que incentivou os desenvolvedores a trazerem de volta alguns Pokémons antigos, apelando para a nostalgia do público que cresceu jogando Pokémon, dando uma margem de segurança a mais dentro de uma abordagem arriscada.
+
+## Gráficos de linha
+### Quantidade de Pokémons por tipo, por geração
+* Aqui vou escolher alguns tipos primários específicos para analisar a quantidade de Pokémons desse tipo adicionados em cada geração
+* Os tipos são: "dragon", "ice", "psychic" e "ground"
+```{r}
+dados %>%
+filter(type1 == "dragon") %>%
+group_by(generation) %>%
+summarise(ocorrencias = n()) %>% 
+ggplot(aes(x = as.numeric(generation), y = ocorrencias)) +
+scale_x_continuous(breaks = 1:9) +
+geom_line() +
+labs(x = "geração", y = "Pokémons dragão(n)") 
+```
+```{r}
+dados %>%
+filter(type1 == "ice") %>%
+group_by(generation) %>%
+summarise(ocorrencias = n()) %>% 
+ggplot(aes(x = as.numeric(generation), y = ocorrencias))  +
+scale_x_continuous(breaks = 1:9) +
+geom_line() +
+labs(x = "geração", y = "Pokémons gelo(n)")
+```
+```{r}
+dados %>%
+filter(type1 == "psychic") %>%
+group_by(generation) %>%
+summarise(ocorrencias = n()) %>% 
+ggplot(aes(x = as.numeric(generation), y = ocorrencias))  +
+scale_x_continuous(breaks = 1:9) +
+geom_line() +
+labs(x = "geração", y = "Pokémons psíquicos(n)")
+```
+```{r}
+dados %>%
+filter(type1 == "ground") %>%
+group_by(generation) %>%
+summarise(ocorrencias = n()) %>% 
+ggplot(aes(x = as.numeric(generation), y = ocorrencias))  +
+scale_x_continuous(breaks = 1:9) +
+geom_line() +
+labs(x = "geração", y = "Pokémons terrestres(n)")
+```
+
+* Com esses gráficos, vemos que a quinta geração realmente é um pico para esses tipos selecionados (não atoa, é a que tem maior quantidade de Pokémons, como visto no gráfico de barras). Porém, é importante perceber que, como foi a última geração do Nintendo DS, é importante mostrar o poder do console, conseguir afirmar que chegou no ápice da utilização do software. Com isso, garantir uma grande diversidade na gameplay foi importante, apresentando maior quanitdade de pokémons de tipos que geralmente aparacem em momentos mais tardios nos jogos.
+
+# Considerações finais
+* Com esse estudo, conseguimos tirar algumas conclusões específicas sobre esse meio de Pokémons. Na minha opinião, a mais importante foi a da relação de não existência de outliers quando olhamos o histograma de total de estatísticas pelas gerações. Não conseguimos afirmar com certeza se é uma métrica usada na hora de desenvolver e planejar uma nova geração, mas com certeza seria um parâmetro válido
